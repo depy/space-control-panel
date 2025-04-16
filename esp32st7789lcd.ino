@@ -21,6 +21,7 @@ uint16_t buffer[BUFFER_SIZE];
 
 File bmpFile;
 
+// Screen data rendered to the screen for each planet
 struct Screen {
   char* imgFilename;
   char* title;
@@ -31,6 +32,8 @@ struct Screen {
   char* moonsInfo;
   uint16_t titleColor;
 };
+
+// ----- Define a screen per planet ------
 
 struct Screen mercury = {
   "/mercury.bmp",
@@ -61,7 +64,7 @@ struct Screen earth = {
   "Orbita: 365d",
   "Gravitacija: 9.8",
   "Temp: -88 - 58C",
-  "Lune: 1 Luna",
+  "Lune: 1",
   0x64ff
 };
 
@@ -72,7 +75,7 @@ struct Screen mars = {
   "Orbita: 687d",
   "Gravitacija: 3.7",
   "Temp: -150 - 20C",
-  "Lune: 2\n Fobos Deimos",
+  "Lune: 2",
   0xCAAA
 };
 
@@ -83,7 +86,7 @@ struct Screen jupiter = {
   "Orbita: 4332d",
   "Gravitacija: 23.1",
   "Temp: ~ -110C",
-  "Lune: 95  Io Evropa\n Ganimed Kalisto",
+  "Lune: 95",
   0xFEEF
 };
 
@@ -94,7 +97,7 @@ struct Screen saturn = {
   "Orbita: 10759d",
   "Gravitacija: 9.0",
   "Temp: ~ -140C",
-  "Lune: 274  Titan\n Mimas Japet Rea",
+  "Lune: 274",
   0xE6D6
 };
 
@@ -120,6 +123,8 @@ struct Screen neptune = {
   0x7E7E
 };
 
+
+// Reads the BMP file from SD card and renders it to the screen
 void drawBMP(char* filename) {
   bmpFile = SD.open(filename);
   if (!bmpFile) {
@@ -127,61 +132,78 @@ void drawBMP(char* filename) {
     return;
   }
 
+  // Skip BMP header
   bmpFile.seek(54);
+
+  // Read the image to a buffer first
   for(int i=0; i< IMG_W * IMG_H; i++) {
+    // Read 3 bytes (24-bit BMP)
     uint8_t pixel[3];
     bmpFile.read(pixel, 3);
 
+    // Convert 24-bit color (RGB 888) to 16-bit color (RGB 565)
+    // and put pixels in reverse order in buffer to mirror the image
     uint16_t color = tft.color565(pixel[2], pixel[1], pixel[0]);
     buffer[BUFFER_SIZE-1-i] = color;
   };
 
+  // Draw the image from the buffer
   tft.drawRGBBitmap(0, 0, buffer, 240, 160);
   bmpFile.close();
 }
 
+// Draws the whole screen
 void drawScreen(Screen scr) {
   drawBMP(scr.imgFilename);
 
+  // Fill the buffer with black color to clear text before render new text
   uint16_t color = tft.color565(0, 0, 0);
   for(int i=0; i< IMG_W * IMG_H; i++) {
-    buffer[BUFFER_SIZE-1-i] = color;
+    buffer[i] = color;
   };
+  // Clear the bottom half of the screen with black color from buffer
   tft.drawRGBBitmap(0, 160, buffer, 240, 160);
 
+  // Print title
   tft.setCursor(65, 160);
   tft.setTextColor(scr.titleColor);
   tft.setTextWrap(false);
   tft.setTextSize(3);
   tft.print(scr.title);
 
+  // Print dividing line
   tft.drawFastHLine(00, 185, 240, 0x6b6d);
 
-  tft.setCursor(5, 200);
+  // Print diameter info
+  tft.setCursor(5, 202);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextWrap(false);
   tft.setTextSize(2);
   tft.print(scr.diameterInfo);
   
-  tft.setCursor(5, 220);
+  // Print orbital info
+  tft.setCursor(5, 224);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextWrap(false);
   tft.setTextSize(2);
   tft.print(scr.orbitalPeriodInfo);
 
-  tft.setCursor(5, 240);
+  // Print gravity info
+  tft.setCursor(5, 246);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextWrap(false);
   tft.setTextSize(2);
   tft.print(scr.gravityInfo);
 
-  tft.setCursor(5, 260);
+  // Print temperature info
+  tft.setCursor(5, 268);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextWrap(false);
   tft.setTextSize(2);
   tft.print(scr.tempInfo);
 
-  tft.setCursor(5, 280);
+  // Print moons info
+  tft.setCursor(5, 290);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextWrap(true);
   tft.setTextSize(2);
@@ -191,17 +213,20 @@ void drawScreen(Screen scr) {
 void setup(void) {
   Serial.begin(115200); 
 
+  // SD card init
   if (!SD.begin(SD_CS)) {
     Serial.println("ERROR: SD card initialization failed!");
     while(1);
   }
   Serial.println("SD card initialized...");
 
-  tft.init(240, 320);    // Init ST7789 display 135x240 pixel
+  // Display init
+  tft.init(240, 320);
   tft.setRotation(0);
   tft.fillScreen(ST77XX_BLACK);
 }
 
+// Just loop over all planets for now
 void loop() {
   drawScreen(mercury);
   delay(3000);
