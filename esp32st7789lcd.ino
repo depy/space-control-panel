@@ -1,13 +1,15 @@
 #include <SD.h>
 #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 
-#define TFT_MOSI 23
-#define TFT_MISO 19
 #define TFT_SCLK 18
-#define TFT_CS   15
-#define TFT_DC    2
-#define TFT_RST   4
+#define TFT_MISO 19
+#define TFT_MOSI 23
+#define TFT_CS   17
+#define TFT_RST  16
+#define TFT_DC    4
 #define SD_CS     5
+
+#define NEXT_PLANET_BTN_PIN 22
 
 #define SCREEN_W 240
 #define SCREEN_H 320 
@@ -15,11 +17,6 @@
 #define IMG_H 160
 
 #define BUFFER_SIZE IMG_W * IMG_H
-
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
-uint16_t buffer[BUFFER_SIZE];
-
-File bmpFile;
 
 // Screen data rendered to the screen for each planet
 struct Screen {
@@ -123,6 +120,21 @@ struct Screen neptune = {
   0x7E7E
 };
 
+// ----- Variables -----
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+File bmpFile;
+uint16_t buffer[BUFFER_SIZE];
+
+uint16_t last_button_time = 0; 
+bool drawing = false;
+bool nextPlanetPressed = false;
+int currentScreen = 0;
+
+Screen screens[8] = {mercury, venus, earth, mars, jupiter, saturn, uranus, neptune};
+
+
+// ----- Functions -----
 
 // Reads the BMP file from SD card and renders it to the screen
 void drawBMP(char* filename) {
@@ -210,6 +222,14 @@ void drawScreen(Screen scr) {
   tft.print(scr.moonsInfo);
 }
 
+void IRAM_ATTR next_planet() {
+  if(millis() - last_button_time > 50) {
+    nextPlanetPressed = true;
+  }
+}
+
+// ----- Setup and loop
+
 void setup(void) {
   Serial.begin(115200); 
 
@@ -224,24 +244,24 @@ void setup(void) {
   tft.init(240, 320);
   tft.setRotation(0);
   tft.fillScreen(ST77XX_BLACK);
+  
+  // Next planet button settings
+  pinMode(NEXT_PLANET_BTN_PIN, INPUT_PULLUP);
+  attachInterrupt(NEXT_PLANET_BTN_PIN, next_planet, RISING);
+
+  drawScreen(screens[currentScreen]);
 }
 
-// Just loop over all planets for now
 void loop() {
-  drawScreen(mercury);
-  delay(3000);
-  drawScreen(venus);
-  delay(3000);
-  drawScreen(earth);
-  delay(3000);
-  drawScreen(mars);
-  delay(3000);
-  drawScreen(jupiter);
-  delay(3000);
-  drawScreen(saturn);
-  delay(3000);
-  drawScreen(uranus);
-  delay(3000);
-  drawScreen(neptune);
-  delay(3000);
+  // Run only if button was pressed and drawing is done
+  if(nextPlanetPressed && !drawing) {
+    drawing = true;
+    currentScreen++;
+    if(currentScreen>7) { 
+      currentScreen = 0; 
+    }
+    drawScreen(screens[currentScreen]);
+    drawing = false;
+    nextPlanetPressed = false;
+  }
 }
