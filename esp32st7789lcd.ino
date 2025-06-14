@@ -130,9 +130,11 @@ uint16_t last_button_time = 0;
 bool drawing = false;
 bool nextPlanetPressed = false;
 int currentScreen = 0;
-
 Screen screens[8] = {mercury, venus, earth, mars, jupiter, saturn, uranus, neptune};
 
+int pwrLEDsPins[8] = {32, 33, 25, 26, 27, 14, 12, 13};
+int pwrPotPin = 34;
+TaskHandle_t pwrTaskHandle;
 
 // ----- Functions -----
 
@@ -222,21 +224,68 @@ void drawScreen(Screen scr) {
   tft.print(scr.moonsInfo);
 }
 
-void IRAM_ATTR next_planet() {
+void IRAM_ATTR nextPlanet() {
   if(millis() - last_button_time > 50) {
     nextPlanetPressed = true;
   }
 }
+
+void pwrCtrlTask(void *param) {
+  TickType_t lastWakeTime = xTaskGetTickCount();
+  int currentLEDs = 0;
+
+  int onThresholds[8] = {200, 700, 1200, 1700, 2200, 2700, 3200, 3700};
+  int offThresholds[8] = {100, 800, 1100, 1800, 2100, 2600, 3100, 3600};
+
+  while(1) {
+    int pwr = 4096 - analogRead(pwrPotPin);
+
+    if(currentLEDs < 8 && pwr >= onThresholds[currentLEDs]) {
+      currentLEDs += 1;
+    }
+
+    if(currentLEDs > 0 && pwr < offThresholds[currentLEDs - 1]) {
+      currentLEDs -= 1;
+    }
+
+    for(int i = 0; i<currentLEDs; i++) {
+      digitalWrite(pwrLEDsPins[i], LOW);
+    }
+
+    for(int i = currentLEDs; i < 8; i++) {
+      digitalWrite(pwrLEDsPins[i], HIGH);
+    }
+
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(20));
+  }
+}
+
+
 
 // ----- Setup and loop
 
 void setup(void) {
   Serial.begin(115200); 
 
+  pinMode(pwrPotPin, INPUT);
+  for(int i=0; i<8; i++) {
+    pinMode(pwrLEDsPins[i], OUTPUT);
+  }
+  
+  xTaskCreatePinnedToCore(
+        pwrCtrlTask,
+        "PotReader",
+        2048,        // Stack size
+        NULL,        // Parameters  
+        2,           // Priority
+        &pwrTaskHandle,
+        1            // Core
+    );
+
   // SD card init
   if (!SD.begin(SD_CS)) {
     Serial.println("ERROR: SD card initialization failed!");
-    while(1);
+    //while(1);
   }
   Serial.println("SD card initialized...");
 
@@ -247,7 +296,7 @@ void setup(void) {
   
   // Next planet button settings
   pinMode(NEXT_PLANET_BTN_PIN, INPUT_PULLUP);
-  attachInterrupt(NEXT_PLANET_BTN_PIN, next_planet, RISING);
+  attachInterrupt(NEXT_PLANET_BTN_PIN, nextPlanet, RISING);
 
   drawScreen(screens[currentScreen]);
 }
