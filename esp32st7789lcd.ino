@@ -1,5 +1,7 @@
 #include <SD.h>
 #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
+#include <Adafruit_NeoPixel.h>
+#include "Button2.h"
 
 #define TFT_SCLK 18
 #define TFT_MISO 19
@@ -17,6 +19,30 @@
 #define IMG_H 160
 
 #define BUFFER_SIZE IMG_W * IMG_H
+
+#define LED_RING_PIN 2
+#define LED_RING_NUM_PIXELS 8
+#define SCANNER_BTN_PIN 15
+// Go in a circle 5 times then blink 10 times (10 times on, 10 times off = 20)
+#define BLINK_TIMES 20
+#define MAX_SCAN_STEPS 5*LED_RING_NUM_PIXELS + BLINK_TIMES
+
+struct RGB {
+  uint8_t R;
+  uint8_t G;
+  uint8_t B;
+};
+
+RGB rareElements[8] = {
+  RGB{0, 0, 0},
+  RGB{255, 0, 0},
+  RGB{0, 255, 0},
+  RGB{0, 0, 255},
+  RGB{255, 255, 0},
+  RGB{255, 0, 255},
+  RGB{0, 255, 255},
+  RGB{255, 255, 255}
+};
 
 // Screen data rendered to the screen for each planet
 struct Screen {
@@ -120,6 +146,8 @@ struct Screen neptune = {
   0x7E7E
 };
 
+
+
 // ----- Variables -----
 
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
@@ -135,6 +163,20 @@ Screen screens[8] = {mercury, venus, earth, mars, jupiter, saturn, uranus, neptu
 int pwrLEDsPins[8] = {32, 33, 25, 26, 27, 14, 12, 13};
 int pwrPotPin = 34;
 TaskHandle_t pwrTaskHandle;
+
+bool scanning = false;
+int scanCounter = 0;
+Button2 scannerBtn;
+unsigned long prevMillis = 0;
+bool allBlink = true;
+int rareElementFound = 0;
+
+Adafruit_NeoPixel pixels(
+    LED_RING_NUM_PIXELS,
+    LED_RING_PIN,
+    NEO_GRB+NEO_KHZ800
+);
+
 
 // ----- Functions -----
 
@@ -168,6 +210,7 @@ void drawBMP(char* filename) {
 
 // Draws the whole screen
 void drawScreen(Screen scr) {
+  Serial.println("Drawing screen...");
   drawBMP(scr.imgFilename);
 
   // Fill the buffer with black color to clear text before render new text
@@ -260,6 +303,57 @@ void pwrCtrlTask(void *param) {
   }
 }
 
+void startScan(Button2 &b) {
+  Serial.println("Scanning...");
+  scanning = true;
+  scanCounter = 0;
+}
+
+void turnOffPixels() {
+  for(int i=0; i<LED_RING_NUM_PIXELS; i++) {
+    pixels.setPixelColor(i, pixels.Color(0, 0, 0));
+  }
+  pixels.show();
+}
+
+void scanStep() {
+  if(scanCounter < MAX_SCAN_STEPS - BLINK_TIMES) {
+    for(int i=0; i<LED_RING_NUM_PIXELS; i++) {
+      int k = scanCounter % LED_RING_NUM_PIXELS;
+      if(i == k) {
+        pixels.setPixelColor(i, pixels.Color(32, 32, 32));
+      } else {
+        pixels.setPixelColor(i, pixels.Color(0, 0, 0));
+      }
+    }
+    pixels.show();
+  } else {
+    RGB color = rareElements[rareElementFound];
+    
+    if(allBlink) {
+      for(int i=0; i<LED_RING_NUM_PIXELS; i++) {
+        pixels.setPixelColor(i, pixels.Color(color.R, color.G, color.B));
+      }
+      allBlink = false;
+    } else {
+      for(int i=0; i<LED_RING_NUM_PIXELS; i++) {
+        pixels.setPixelColor(i, pixels.Color(0, 0, 0));
+      }
+      allBlink = true;
+    }
+    pixels.show();
+  }
+
+  scanCounter++;
+  if(scanCounter >= MAX_SCAN_STEPS) {
+    // Finished
+    scanCounter = 0;
+    scanning = false;
+    allBlink = true;
+    rareElementFound = random(0, 8);
+  }
+}
+
 
 
 // ----- Setup and loop
@@ -267,27 +361,47 @@ void pwrCtrlTask(void *param) {
 void setup(void) {
   Serial.begin(115200); 
 
+
+
+  // ----- Thrusters power control -----
+  
   pinMode(pwrPotPin, INPUT);
   for(int i=0; i<8; i++) {
     pinMode(pwrLEDsPins[i], OUTPUT);
   }
   
   xTaskCreatePinnedToCore(
-        pwrCtrlTask,
-        "PotReader",
-        2048,        // Stack size
-        NULL,        // Parameters  
-        2,           // Priority
-        &pwrTaskHandle,
-        1            // Core
-    );
+    pwrCtrlTask,
+    "PotReader",
+    2048,        // Stack size
+    NULL,        // Parameters  
+    2,           // Priority
+    &pwrTaskHandle,
+    1            // Core
+  );
 
-  // SD card init
+
+
+  // ----- Rare elements scanner -----
+
+  pixels.begin();
+  pixels.setBrightness(8);
+  scannerBtn.begin(SCANNER_BTN_PIN);
+  scannerBtn.setTapHandler(startScan);
+  rareElementFound = random(0, 8);
+
+
+
+  // ----- Destination screen -----
+
   if (!SD.begin(SD_CS)) {
     Serial.println("ERROR: SD card initialization failed!");
-    //while(1);
+    // Don't want SD card init to halt the whole system.
+    // Otherwise we need everything connected when putting ESP32 back on breadboard for debugging.
+    // while(1); 
+  } else {
+    Serial.println("SD card initialized...");
   }
-  Serial.println("SD card initialized...");
 
   // Display init
   tft.init(240, 320);
@@ -302,6 +416,19 @@ void setup(void) {
 }
 
 void loop() {
+  scannerBtn.loop();
+
+  unsigned long currentMillis = millis();
+
+  if(currentMillis - prevMillis >= 100) {
+    prevMillis = currentMillis;
+    if(scanning) {
+      scanStep();
+    } else {
+      turnOffPixels();
+    }
+  }
+
   // Run only if button was pressed and drawing is done
   if(nextPlanetPressed && !drawing) {
     drawing = true;
